@@ -90,9 +90,9 @@ class Simulation:
         self.Kv = 20.0       # Velocity Error Gain
         self.Ka = 10.0       # Acceleration Error Gain
 
-        self.obsLambda1 = 3.0  # Observer pole 1
-        self.obsLambda2 = 5.0  # Observer pole 2
-        self.obsLambda3 = 7.0  # Observer pole 2
+        self.obsLambda1 = 1.0  # Observer pole 1
+        self.obsLambda2 = 2.0  # Observer pole 2
+        self.obsLambda3 = 3.0  # Observer pole 2
 
         self.obsK1 = self.obsLambda1 + self.obsLambda2 + self.obsLambda3    # Observer gain 1
         self.obsK2 = self.obsLambda1 * self.obsLambda2 + self.obsLambda1 * self.obsLambda3 + self.obsLambda2 * self.obsLambda3  # Observer gain 2
@@ -133,6 +133,10 @@ class Simulation:
         self.LLfhGP2on = np.empty((0))      # Second Lie Derivative GP2 online
         self.LLfhGP1off = np.empty((0))     # Lie Derivative GP offline
         self.LLfhGP2off = np.empty((0))     # Lie Derivative GP 2 offline
+
+        self.LLfhGP3on = np.empty((0))
+        self.LLfhGP3off = np.empty((0))
+
 
 
         self.gpSigma = np.empty((0))
@@ -220,7 +224,7 @@ class Simulation:
         self.dz = np.zeros((self.rel_degree, 1))
         self.dz[0] = self.zAct[1] + self.obsL*self.obsK1*(self.h_noise - self.zAct[0])
         self.dz[1] = self.zAct[2] + self.obsL**2*self.obsK2*(self.h_noise - self.zAct[0])
-        self.dz[2] = self.obsL**2*self.obsK2*(self.h_noise - self.zAct[0])
+        self.dz[2] = self.obsL**3*self.obsK2*(self.h_noise - self.zAct[0])
 
         return self.dz
 
@@ -299,6 +303,16 @@ class Simulation:
         plt.title('Offline Gaussian Processes Errors')
         plt.legend()
 
+        fig8, ax8 = plt.subplots()
+        ax2.set_xlabel("t (s)")
+        plt.plot(time_vec, self.LLfh, label = r'$\mathcal{L}_f h_s$', linewidth=2)
+        plt.plot(time_vec, self.z[2, :], label = r'$z_3$', linewidth=2)
+        plt.plot(time_vec, self.LLfhGP1on, label = r'$\mathcal{L}_f \mu_h$', linewidth=2)
+        plt.plot(time_vec, self.LLfhGP3on, label = r'$z_{3, GP}$', linewidth=2)
+        plt.plot(time_vec, self.LLfhGP3off, label = r'$z_{3, GP}$', linewidth=2)
+        plt.legend()
+        plt.title(r'Online Comparison of Estimation of $\mathcal{L}_f^2 h_s$')
+
         # Show plots
         plt.show()
         plt.close()
@@ -371,6 +385,16 @@ class Simulation:
                 self.d_dist_fitter.add_sample(self.xAct[0:4], self.zAct[1])
                 self.d_dist_fitter.train()
             
+            # Update third GP
+            new = True
+            for x in self.dd_dist_fitter.params.gp_x.T:
+                if np.linalg.norm(self.xAct - x.reshape((6,1))) < 0.05:
+                    new = False
+                    break
+            if new:
+                self.dd_dist_fitter.add_sample(self.xAct, self.zAct[2])
+                self.dd_dist_fitter.train()
+            
             # Auxiliary Quantities
             self.distanceReadings()             # Distance readings
             self.gradientDistanceReadings()     # Gradients distance readings
@@ -418,6 +442,8 @@ class Simulation:
             llfh = self.gradSh.T @ self.a + self.v.T @ self.hessSh @ self.v
             llfh_GP1 = self.dist_fitter.posterior_dxmean(self.p).T @ self.a + self.v.T @ self.dist_fitter.posterior_ddxmean(self.p) @ self.v
             llfh_GP2 = 0
+            llfh_GP3 = self.dd_dist_fitter.posterior_mean(self.xAct)
+
 
 
             # Plot Quantities
@@ -425,9 +451,11 @@ class Simulation:
             self.LfhGP1on = np.append(self.LfhGP1on, lfh_GP1)               # Estimate GP1 First Derivative online
             self.LfhGP2on = np.append(self.LfhGP2on, lfh_GP2)               # Estimate GP2 First Derivative online
             
-            self.LLfh = np.append(self.LLfh, llfh)                           # Real Second Derivative
-            self.LLfhGP1on = np.append(self.LLfhGP1on, llfh_GP1)            # Estimate GP1 First Derivative online
-            self.LLfhGP2on = np.append(self.LLfhGP2on, llfh_GP2)            # Estimate GP2 First Derivative online
+            self.LLfh = np.append(self.LLfh, llfh)                          # Real Second Derivative
+            self.LLfhGP1on = np.append(self.LLfhGP1on, llfh_GP1)            # Estimate GP1 Second Derivative online
+            self.LLfhGP2on = np.append(self.LLfhGP2on, llfh_GP2)            # Estimate GP2 Second Derivative online
+            self.LLfhGP3on = np.append(self.LLfhGP3on, llfh_GP3)            # Estimate GP3 Second Derivative online
+
 
             self.hStory = np.append(self.hStory, self.dist_fun())
             self.hGPStory = np.append(self.hGPStory, self.dist_fitter.posterior_mean(self.p))
@@ -440,10 +468,11 @@ class Simulation:
 
         # Compute offline quantities
 
-        # GP 2 values
+        # GP 2 and GP3 values
         for xx in self.x.T:
             self.LfhGP2off = np.append(self.LfhGP2off, self.d_dist_fitter.posterior_mean(xx[0:4]))  
-        
+            self.LLfhGP3off = np.append(self.LLfhGP3off, self.dd_dist_fitter.posterior_mean(xx))  
+
         # GP 1 values
         for tt in range(np.size(self.x, 1)):
             self.hGPoff = np.append(self.hGPoff, self.dist_fitter.posterior_mean(self.x[0:2, tt]))

@@ -11,7 +11,7 @@ class Parameters:
     self.gp_alpha = np.empty((0))
     self.gp_x = np.empty((n,0))
     self.gp_y = np.empty((m,0))
-    self.s = 0.001
+    self.s = 0.01
     self.tau = np.ones((n,))*1
     self.msn = 10000
 
